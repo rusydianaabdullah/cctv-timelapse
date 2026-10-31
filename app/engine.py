@@ -334,7 +334,7 @@ class Engine:
     def cleanup(self):
         r = config.load()["retention"]
         today = date.today()
-        for base, days, is_dir in ((IMAGES_DIR, r["images_days"], True), (IMAGES_DIR.parent / "thumbs", r["images_days"], True), (TIMELAPSE_DIR, r["timelapse_days"], False)):
+        for base, days, is_dir in ((IMAGES_DIR, r["images_days"], True), (config.DATA_DIR / "thumbs", r["images_days"], True), (TIMELAPSE_DIR, r["timelapse_days"], False)):
             if not days or days <= 0 or not base.exists():
                 continue
             cutoff = today - timedelta(days=days)

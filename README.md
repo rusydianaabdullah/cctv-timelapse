@@ -36,28 +36,32 @@ RTSP ──ffmpeg (on demand)──▶ JPEG frames ──WebSocket──▶ Live
 ```bash
 git clone https://github.com/rusydianaabdullah/cctv-timelapse.git
 cd cctv-timelapse
+cp .env.sample .env        # optional, see below
 docker compose up -d --build
 ```
 
-Open `http://<host>:8003`, go to **Config** and add your cameras, then arrange them under **Layout**.
+Open `http://<host>:8003` (or your `APP_PORT`), go to **Config** and add your cameras, then arrange them under **Layout**.
 
-### docker-compose.yml
+### Settings (`.env`, optional)
 
-```yaml
-services:
-  cctv:
-    build: .
-    container_name: cctv-mini
-    restart: unless-stopped
-    user: "1000:1000"          # owner of ./data on the host
-    ports:
-      - "8003:8000"
-    environment:
-      - TZ=Asia/Jakarta        # folder dates and the timelapse schedule use this zone
-      - SCAN_SUBNET=192.168.0.0/24   # default subnet for the RTSP scanner
-    volumes:
-      - ./data:/data
+Static settings for the container live in `.env`. Copy the sample and edit it:
+
+```bash
+cp .env.sample .env
 ```
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_PORT` | `8003` | host port for the web UI |
+| `CONTAINER_NAME` | `cctv-mini` | Docker container name |
+| `TZ` | `Asia/Jakarta` | timezone for folder dates and the timelapse schedule |
+| `SCAN_SUBNET` | `192.168.1.0/24` | default subnet for the RTSP scanner |
+| `PUID` / `PGID` | `1000` | user/group the app runs as (must own the folders below) |
+| `DATA_PATH` | `./data` | host folder for `config.json` and thumbnails |
+| `PICTURES_PATH` | `./data/cctv` | host folder for saved collages (e.g. a bigger disk / NAS) |
+| `TIMELAPSE_PATH` | `./data/timelapse` | host folder for timelapse videos |
+
+Everything is optional: without `.env`, the defaults apply. Cameras, layouts and tuning stay in `config.json` and are edited from the UI. `.env` is git-ignored.
 
 ### Run without Docker
 
@@ -65,6 +69,7 @@ You need Python 3.12+ and `ffmpeg` on your PATH.
 
 ```bash
 pip install -r requirements.txt
+# optional: IMAGES_DIR=/mnt/nas/cctv TIMELAPSE_DIR=/mnt/nas/timelapse
 CONFIG_PATH=data/config.json DATA_DIR=data uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 

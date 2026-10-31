@@ -119,7 +119,7 @@ def media(day: str, name: str):
     return FileResponse(p)
 
 
-THUMB_DIR = IMAGES_DIR.parent / "thumbs"
+THUMB_DIR = config.DATA_DIR / "thumbs"
 
 
 @app.get("/thumb/{day}/{name}")

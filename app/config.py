@@ -7,8 +7,8 @@ from pathlib import Path
 
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", "data/config.json"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
-IMAGES_DIR = DATA_DIR / "cctv"
-TIMELAPSE_DIR = DATA_DIR / "timelapse"
+IMAGES_DIR = Path(os.environ.get("IMAGES_DIR", DATA_DIR / "cctv"))
+TIMELAPSE_DIR = Path(os.environ.get("TIMELAPSE_DIR", DATA_DIR / "timelapse"))
 
 DEFAULTS = {
     "cameras": [],

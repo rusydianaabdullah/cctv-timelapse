@@ -1,13 +1,16 @@
+# All values come from .env (copy .env.sample to .env); the defaults after ":-" apply when unset.
 services:
   cctv:
     build: .
-    container_name: cctv-mini
+    container_name: ${CONTAINER_NAME:-cctv-mini}
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      - "8003:8000"
+      - "${APP_PORT:-8003}:8000"
     environment:
-      - TZ=Asia/Jakarta
-      - SCAN_SUBNET=192.168.0.0/24
+      - TZ=${TZ:-Asia/Jakarta}
+      - SCAN_SUBNET=${SCAN_SUBNET:-192.168.1.0/24}
     volumes:
-      - ./data:/data
+      - ${DATA_PATH:-./data}:/data
+      - ${PICTURES_PATH:-./data/cctv}:/data/cctv
+      - ${TIMELAPSE_PATH:-./data/timelapse}:/data/timelapse
