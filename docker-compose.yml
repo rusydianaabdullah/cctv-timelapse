@@ -1,0 +1,13 @@
+services:
+  cctv:
+    build: .
+    container_name: cctv-mini
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "8003:8000"
+    environment:
+      - TZ=Asia/Jakarta
+      - SCAN_SUBNET=192.168.0.0/24
+    volumes:
+      - ./data:/data

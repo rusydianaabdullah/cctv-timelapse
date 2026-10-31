@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block navtabs %}<div class="tabs"><button type="button" id="tLast" onclick="setTab('last')">Last capture</button>
+<button type="button" id="tRt" onclick="setTab('rt')">Realtime</button></div>{% endblock %}
+{% block body %}
+<style>
+main{max-width:none;padding:8px 12px}
+[hidden]{display:none!important}
+.lbar{display:flex;gap:8px;align-items:center;height:32px;font-size:12px}
+.lbar .pg{display:flex;gap:4px;flex-wrap:nowrap;overflow-x:auto}.lbar .pg button.on{border-color:var(--acc);color:#fff}
+.lbar .pg button{padding:3px 10px}#ev{margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cimg{width:100%;height:calc(100dvh - 48px - 32px - 24px);object-fit:contain;display:block;background:#000;border-radius:6px}
+/* realtime board fills the screen below the topbar; cards are fractions of it (Layout → Live) */
+.rt{position:relative;width:100%;height:calc(100dvh - 48px - 32px - 24px);background:#000;border-radius:6px;overflow:hidden}
+.rt .cell{position:absolute;padding:1px}
+.rt .cell div{position:relative;width:100%;height:100%;background:#0a0a0a;overflow:hidden}
+.rt img{width:100%;height:100%;object-fit:contain;display:block}
+.rt .lb{position:absolute;left:4px;top:4px;background:#000a;padding:2px 8px;border-radius:4px;font-size:12px}
+.rt .lb.mo{color:var(--acc);font-weight:600}
+.rt .wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px}
+.rt .cell div:fullscreen img{object-fit:contain}
+</style>
+<div class="lbar"><div class="pg" id="pageTabs"></div><span class="mut" id="ev">…</span></div>
+<div id="vLast"><img id="cimg" alt="Last capture"></div>
+<div id="vRt" class="rt"></div>
+{% if not cfg.cameras %}<p>No cameras yet — <a href="/config" style="color:#e44">add one in Config</a>.</p>{% endif %}
+<script>
+const iv = {{ (cfg.capture.interval_seconds * 1000)|int }};
+const cams = {{ cfg.cameras|tojson }}.map((c, i) => ({...c, index: i})).filter(c => c.enabled);
+const pages = {{ cfg.live_layout.pages|tojson }}.map(p => ({name: p.name, cards: p.cards.filter(c => cams.some(k => k.id == c.cam))}));
+const store = {get(k, d){ try { return localStorage.getItem('live.' + k) ?? d } catch (e) { return d } },
+               set(k, v){ try { localStorage.setItem('live.' + k, v) } catch (e) {} }};
+let tab = store.get('tab', 'last'), page = Math.min(+store.get('page', 0) || 0, Math.max(0, pages.length - 1));
+let sockets = [];
+
+function autoCards(){   // no live layout saved yet: grid of all enabled cameras
+  const n = cams.length, cols = Math.ceil(Math.sqrt(n)) || 1, rows = Math.ceil(n / cols) || 1;
+  return cams.map((c, k) => ({cam: c.id, x: (k % cols)/cols, y: Math.floor(k / cols)/rows, w: 1/cols, h: 1/rows}));
+}
+
+function setTab(t){
+  tab = t; store.set('tab', t);
+  tLast.classList.toggle('on', t == 'last'); tRt.classList.toggle('on', t == 'rt');
+  vLast.hidden = t != 'last'; vRt.hidden = t != 'rt';
+  pageTabs.hidden = t != 'rt' || pages.length < 2;
+  closeAll();
+  if (t == 'rt') openPage(); else refresh();
+}
+
+function drawPages(){
+  pageTabs.innerHTML = '';
+  pages.forEach((p, k) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = p.name; b.className = k == page ? 'on' : '';
+    b.onclick = () => { page = k; store.set('page', k); closeAll(); openPage() };
+    pageTabs.appendChild(b);
+  });
+}
+
+function closeAll(){
+  sockets.forEach(s => { s.stop = true; s.ws && s.ws.close() });
+  sockets = [];
+  vRt.innerHTML = '';
+}
+
+function openPage(){
+  drawPages();
+  const cards = pages[page] && pages[page].cards.length ? pages[page].cards : autoCards();
+  cards.forEach(c => {
+    const cam = cams.find(k => k.id == c.cam);
+    if (!cam) return;
+    const cell = document.createElement('div'); cell.className = 'cell';
+    Object.assign(cell.style, {left: c.x*100+'%', top: c.y*100+'%', width: c.w*100+'%', height: c.h*100+'%'});
+    cell.innerHTML = `<div title="Double-click for full screen"><img alt=""><span class="wait">connecting…</span><span class="lb" data-i="${cam.index}">${cam.name}</span></div>`;
+    cell.firstChild.ondblclick = e => document.fullscreenElement ? document.exitFullscreen() : e.currentTarget.requestFullscreen?.();
+    vRt.appendChild(cell);
+    connect(cam.index, cell.querySelector('img'), cell.querySelector('.wait'));
+  });
+}
+
+function connect(i, img, wait){
+  const s = {stop: false, url: null};
+  sockets.push(s);
+  const open = () => {
+    if (s.stop) return;
+    const ws = s.ws = new WebSocket((location.protocol == 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/live/' + i);
+    ws.binaryType = 'blob';
+    ws.onmessage = e => {
+      if (typeof e.data == 'string') return;          // keep-alive
+      const u = URL.createObjectURL(e.data);
+      img.onload = () => { if (s.url) URL.revokeObjectURL(s.url); s.url = u };
+      img.src = u; wait.hidden = true;
+    };
+    ws.onclose = () => { if (!s.stop) { wait.hidden = false; wait.textContent = 'reconnecting…'; setTimeout(open, 3000) } };
+  };
+  open();
+}
+
+function refresh(){
+  if (tab == 'last') cimg.src = '/api/collage.jpg?t=' + Date.now();
+  fetch('/api/status').then(r => r.json()).then(s => {
+    ev.textContent = s.last_event ? 'Last save: ' + s.last_event : 'No motion saved yet';
+    document.querySelectorAll('.rt .lb').forEach(l => {
+      const c = s.cameras[l.dataset.i]; if (!c) return;
+      l.textContent = c.name + (c.online ? '' : ' · offline') + (c.motion ? ' · MOTION' : '');
+      l.classList.toggle('mo', !!c.motion || !c.online);
+    });
+  }).catch(() => {});
+}
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) closeAll(); else setTab(tab) });
+setTab(tab);
+setInterval(refresh, Math.max(1000, iv));
+</script>
+{% endblock %}

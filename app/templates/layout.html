@@ -1,0 +1,165 @@
+{% extends "base.html" %}{% block body %}
+<style>
+main{max-width:none;padding:8px 12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.bar label{flex-direction:row;align-items:center;margin:0;gap:6px}.bar input[type=number]{width:76px}
+.bar select{background:#000;color:var(--fg);border:1px solid #444;border-radius:4px;padding:5px}
+.seg{display:inline-flex;border:1px solid #444;border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:#222}.seg button.on{background:#522;color:#fff}
+.pages{display:inline-flex;gap:4px;flex-wrap:wrap}.pages button.on{border-color:var(--acc);color:#fff}
+[hidden]{display:none!important}
+/* recording: board keeps the output aspect ratio. live: board is the screen area itself */
+.board{position:relative;margin:0 auto;background:#050505;border:1px solid var(--bd);border-radius:6px;touch-action:none;
+ background-image:linear-gradient(#1a1a1a 1px,transparent 1px),linear-gradient(90deg,#1a1a1a 1px,transparent 1px);
+ background-size:calc(100% / 24) calc(100% / 24)}
+.board.rec{height:min(82dvh,calc((100vw - 24px) * var(--ar)));aspect-ratio:1/var(--ar)}
+.board.live{width:100%;height:82dvh}
+.card{position:absolute;background:#000;border:1px solid #555;overflow:hidden;cursor:move;user-select:none}
+.card.sel{border-color:var(--acc);z-index:5}
+.card img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+.card .hd{position:absolute;top:0;left:0;right:0;display:flex;gap:4px;padding:3px;background:#000b}
+.card select{flex:1;min-width:0;background:#000;color:var(--fg);border:1px solid #444;border-radius:4px;font:12px system-ui}
+.card .hd button{padding:0 8px;font-size:12px}
+.card .rs{position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;
+ background:linear-gradient(135deg,transparent 50%,var(--acc) 50%)}
+.card .sz{position:absolute;left:4px;bottom:3px;font-size:11px;color:var(--mut);pointer-events:none}
+#msg{font-size:12px}
+</style>
+<div class="bar">
+<div class="seg"><button type="button" id="mRec" onclick="setMode('rec')">Recording</button><button type="button" id="mLive" onclick="setMode('live')">Live</button></div>
+<span id="recTools" class="bar" style="margin:0">
+<label>Output<select id="op" onchange="setPreset()">
+<option value="640x360">360p</option><option value="854x480">480p</option><option value="1280x720">720p</option>
+<option value="1920x1080">1080p</option><option value="2560x1440">1440p</option><option value="3840x2160">4K</option>
+<option value="">Custom</option></select><input type="number" id="ow" step="2" min="160" value="{{cfg.layout.width}}">×<input type="number" id="oh" step="2" min="90" value="{{cfg.layout.height}}"></label>
+<label>JPEG<input type="number" id="oq" min="10" max="95" value="{{cfg.layout.jpeg_quality}}"></label>
+<label><input type="checkbox" id="ol" {{'checked' if cfg.layout.show_labels}}>Labels</label>
+</span>
+<span id="liveTools" class="bar" style="margin:0">
+<span class="pages" id="pageTabs"></span>
+<button type="button" class="ib" data-tip="Add page" onclick="addPage()">＋</button>
+<button type="button" class="ib" data-tip="Rename page" onclick="renamePage()">✎</button>
+<button type="button" class="ib danger" data-tip="Delete page" onclick="delPage()">✕</button>
+</span>
+<button type="button" onclick="addCard()">+ Card</button>
+<button type="button" onclick="autoGrid()">Auto grid</button>
+<button type="button" onclick="cards().splice(0);render()">Clear</button>
+<button type="button" onclick="save()" style="background:#522;border-color:#844">Save</button>
+<span id="msg" class="mut"></span>
+</div>
+<div class="board" id="board"></div>
+{% if not cams %}<p>No cameras yet — <a href="/config" style="color:#e44">add one in Config</a>.</p>{% endif %}
+<script>
+const G = 24, iv = {{ (cfg.capture.interval_seconds * 1000)|int }};
+const cams = {{ cams|tojson }}.filter(c => c.enabled);
+const known = c => cams.some(k => k.id == c.cam);
+const REC = {cards: {{ cfg.layout.cards|tojson }}.filter(known)};
+const LIVE = {pages: {{ cfg.live_layout.pages|tojson }}.map(p => ({name: p.name, cards: p.cards.filter(known)}))};
+if (!LIVE.pages.length) LIVE.pages.push({name: 'Page 1', cards: []});
+let mode = 'rec', page = 0, sel = -1;
+try { mode = localStorage.getItem('layout.mode') || 'rec' } catch (e) {}
+const snap = v => Math.round(v * G) / G, clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const cards = () => mode == 'rec' ? REC.cards : LIVE.pages[page].cards;
+
+function setMode(m){
+  mode = m; sel = -1;
+  try { localStorage.setItem('layout.mode', m) } catch (e) {}
+  mRec.classList.toggle('on', m == 'rec'); mLive.classList.toggle('on', m == 'live');
+  recTools.hidden = m != 'rec'; liveTools.hidden = m != 'live';
+  board.className = 'board ' + m;
+  msg.textContent = m == 'rec' ? 'Recording: the saved collage, sized by output pixels.'
+                               : 'Live: each page fills the screen on the Live page.';
+  if (!cards().length) autoGrid(); else render();
+}
+
+function drawPages(){
+  pageTabs.innerHTML = '';
+  LIVE.pages.forEach((p, k) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = p.name;
+    b.className = k == page ? 'on' : ''; b.onclick = () => { page = k; sel = -1; render() };
+    pageTabs.appendChild(b);
+  });
+}
+function addPage(){ LIVE.pages.push({name: 'Page ' + (LIVE.pages.length + 1), cards: []}); page = LIVE.pages.length - 1; autoGrid() }
+function renamePage(){ const n = prompt('Page name', LIVE.pages[page].name); if (n && n.trim()) { LIVE.pages[page].name = n.trim(); drawPages() } }
+function delPage(){
+  if (LIVE.pages.length < 2) { msg.textContent = 'At least one page is needed.'; return }
+  LIVE.pages.splice(page, 1); page = Math.max(0, page - 1); render();
+}
+
+function setAspect(){ board.style.setProperty('--ar', (+oh.value || 1080) / (+ow.value || 1920)) }
+function syncPreset(){ op.value = [...op.options].some(o => o.value == ow.value+'x'+oh.value) ? ow.value+'x'+oh.value : '' }
+function setPreset(){ if (!op.value) return; [ow.value, oh.value] = op.value.split('x'); setAspect(); render() }
+function camIndex(id){ const c = cams.find(c => c.id == id); return c ? c.index : -1 }
+function sizeText(c){ return mode == 'rec' ? `${Math.round(c.w*ow.value)}×${Math.round(c.h*oh.value)}`
+                                           : `${Math.round(c.w*100)}% × ${Math.round(c.h*100)}%` }
+function place(el, c){ Object.assign(el.style, {left: c.x*100+'%', top: c.y*100+'%', width: c.w*100+'%', height: c.h*100+'%'}) }
+
+function render(){
+  if (mode == 'live') drawPages();
+  board.innerHTML = '';
+  cards().forEach((c, k) => {
+    const el = document.createElement('div');
+    el.className = 'card' + (k == sel ? ' sel' : '');
+    place(el, c);
+    el.innerHTML = `<img data-i="${camIndex(c.cam)}"><div class="hd"><select>${cams.map(m =>
+      `<option value="${m.id}" ${m.id == c.cam ? 'selected' : ''}>${m.name}</option>`).join('')}</select>
+      <button type="button" class="danger" title="Remove">✕</button></div>
+      <div class="sz">${sizeText(c)}</div><div class="rs"></div>`;
+    el.querySelector('select').onchange = e => { c.cam = e.target.value; render() };
+    el.querySelector('button').onclick = () => { cards().splice(k, 1); sel = -1; render() };
+    el.onpointerdown = e => startDrag(e, k, e.target.classList.contains('rs'));
+    board.appendChild(el);
+  });
+  refresh();
+}
+
+function startDrag(e, k, resize){
+  if (e.target.closest('select,button')) return;
+  e.preventDefault(); sel = k;
+  document.querySelectorAll('.card').forEach((el, j) => el.classList.toggle('sel', j == k));
+  const c = cards()[k], r = board.getBoundingClientRect(), o = {...c}, sx = e.clientX, sy = e.clientY;
+  const el = board.children[k];
+  el.setPointerCapture(e.pointerId);
+  el.onpointermove = m => {
+    const dx = snap((m.clientX - sx) / r.width), dy = snap((m.clientY - sy) / r.height);
+    if (resize){ c.w = clamp(o.w + dx, 1/G, 1 - o.x); c.h = clamp(o.h + dy, 1/G, 1 - o.y) }
+    else { c.x = clamp(o.x + dx, 0, 1 - o.w); c.y = clamp(o.y + dy, 0, 1 - o.h) }
+    place(el, c); el.querySelector('.sz').textContent = sizeText(c);
+  };
+  el.onpointerup = () => { el.onpointermove = el.onpointerup = null };
+}
+
+function addCard(){
+  if (!cams.length) return;
+  const used = new Set(cards().map(c => c.cam));
+  const cam = (cams.find(c => !used.has(c.id)) || cams[0]).id;
+  cards().push({cam, x: 0, y: 0, w: 8/G, h: 8/G}); sel = cards().length - 1; render();
+}
+
+function autoGrid(){
+  const n = cams.length, cols = Math.ceil(Math.sqrt(n)) || 1, rows = Math.ceil(n / cols) || 1;
+  cards().splice(0, Infinity, ...cams.map((c, k) => ({cam: c.id, x: (k % cols)/cols, y: Math.floor(k / cols)/rows, w: 1/cols, h: 1/rows})));
+  sel = -1; render();
+}
+
+async function save(){
+  msg.textContent = 'Saving…';
+  const body = {width: +ow.value, height: +oh.value, jpeg_quality: +oq.value, show_labels: ol.checked, cards: REC.cards, live: LIVE};
+  try {
+    const r = await fetch('/api/layout', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.json()).detail);
+    msg.textContent = 'Saved ✓ (recording + live)';
+  } catch (e) { msg.textContent = 'Error: ' + e.message }
+}
+
+function refresh(){
+  const t = Date.now();
+  board.querySelectorAll('img').forEach(i => { if (i.dataset.i >= 0) i.src = '/api/camera/' + i.dataset.i + '.jpg?t=' + t });
+}
+
+ow.oninput = oh.oninput = () => { syncPreset(); setAspect(); render() };
+syncPreset(); setAspect(); setMode(mode);
+setInterval(refresh, Math.max(2000, iv));
+</script>
+{% endblock %}

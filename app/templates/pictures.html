@@ -1,0 +1,156 @@
+{% extends "base.html" %}{% block body %}
+<style>
+main{padding:8px 12px 0}
+.ph{display:flex;align-items:center;gap:6px;height:40px}
+.ph .n{font-size:12px;margin-left:4px}
+.ph .nav{width:28px;height:28px;font-size:12px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.ph .nav.off{opacity:.3;pointer-events:none}
+.ph select{background:#000;color:var(--fg);border:1px solid #444;border-radius:6px;padding:4px 6px;font:600 14px system-ui}
+/* frame fills the viewport: minus topbar 48, header 40, bottom panel 92, gaps */
+.pv-stage{position:relative;background:#000;border-radius:6px;overflow:hidden;height:calc(100dvh - 48px - 40px - 92px - 20px)}
+.pv-stage img{width:100%;height:100%;object-fit:contain;display:block}
+.pv-ts{position:absolute;left:8px;top:8px;background:#000a;padding:4px 10px;border-radius:4px;font:600 18px ui-monospace,monospace}
+.pv-ctr{position:absolute;right:8px;top:8px;background:#000a;padding:4px 8px;border-radius:4px}
+.pv-bar{position:fixed;left:0;right:0;bottom:0;z-index:40;height:92px;display:flex;flex-direction:column;gap:2px;
+ padding:4px 12px 6px;background:#000e;border-top:1px solid var(--bd);backdrop-filter:blur(6px)}
+.pv-bar button{flex:none;width:36px;height:34px;padding:0}
+.pv-bar select{flex:none;background:#000;color:var(--fg);border:1px solid #444;border-radius:4px;padding:6px 2px}
+.pv-btns{display:flex;flex-wrap:nowrap;gap:6px;justify-content:center;align-items:center}
+.tl{position:relative;height:46px;cursor:pointer;user-select:none;touch-action:none}
+.tl-bar{position:absolute;left:0;right:0;top:6px;height:22px;background:#000;border:1px solid var(--bd);border-radius:4px}
+.tl-tick{position:absolute;top:0;bottom:0;width:1px;background:#4a8}
+.tl-head{position:absolute;top:2px;height:30px;width:3px;margin-left:-1px;background:var(--acc);border-radius:2px;pointer-events:none;box-shadow:0 0 6px var(--acc)}
+.tl-hr{position:absolute;top:31px;font-size:11px;color:var(--mut);transform:translateX(-50%)}
+</style>
+
+<div class="ph">
+<a class="btn nav {{'' if nav.older else 'off'}}" href="/pictures?day={{nav.older}}" title="Older day">◀</a>
+<form class="inl" method="get" action="/pictures"><select name="day" onchange="this.form.submit()" aria-label="Day">
+{% for d in days %}<option value="{{d}}" {{'selected' if d==day}}>{{d}}</option>{% endfor %}</select></form>
+<a class="btn nav {{'' if nav.newer else 'off'}}" href="/pictures?day={{nav.newer}}" title="Newer day">▶</a>
+{% if files %}<span class="mut n">{{files|length}} frames</span>{% endif %}
+</div>
+
+{% if files %}
+<div class="pv-stage"><img id="pvImg" alt=""><span class="pv-ts" id="pvTs">--:--:--</span><span class="pv-ctr mut" id="pvCtr"></span></div>
+<div class="pv-bar">
+  <div class="tl" id="tl"><div class="tl-bar" id="tlBar"></div><div class="tl-head" id="tlHead"></div></div>
+  <div class="pv-btns">
+    <button id="bFirst" title="First (Home)">⏮</button>
+    <button id="bPrev" title="Previous (←)">‹</button>
+    <button id="bPlay" title="Play/Pause (Space)">▶</button>
+    <button id="bNext" title="Next (→)">›</button>
+    <button id="bLast" title="Last (End)">⏭</button>
+    <select id="sSpeed" title="Playback fps"><option value="1">1 fps</option><option value="2">2 fps</option><option value="5" selected>5 fps</option>
+    <option value="10">10 fps</option><option value="20">20 fps</option><option value="30">30 fps</option></select>
+  </div>
+</div>
+{% else %}<p class="mut" style="text-align:center">No pictures{{ ' for this day' if day }}.</p>{% endif %}
+
+{% if files %}
+<script>
+(() => {
+  const DAY = {{ day|tojson }}, FILES = {{ files|tojson }};
+  const secs = f => +f.slice(0,2)*3600 + +f.slice(2,4)*60 + +f.slice(4,6);
+  const fmt = s => [s/3600|0, s/60%60|0, s%60|0].map(n => String(n).padStart(2,'0')).join(':');
+  const T = FILES.map(secs), N = FILES.length;
+  const $ = id => document.getElementById(id);
+  const img = $('pvImg'), tl = $('tl'), bar = $('tlBar'), head = $('tlHead');
+  const store = { get(k,d){ try{ return localStorage.getItem('pv.'+k) ?? d }catch{ return d } },
+                  set(k,v){ try{ localStorage.setItem('pv.'+k, v) }catch{} } };
+
+  // visible window (seconds of day): the day's frame span, padded to whole hours
+  let win = [0, 86400], idx = N - 1, timer = null, loadTok = 0;
+
+  const nearest = s => {            // binary search closest frame to second s
+    let lo = 0, hi = N - 1;
+    while (lo < hi) { const m = (lo+hi) >> 1; T[m] < s ? lo = m+1 : hi = m; }
+    return lo > 0 && Math.abs(T[lo-1]-s) <= Math.abs(T[lo]-s) ? lo-1 : lo;
+  };
+  const pct = s => (s - win[0]) / (win[1] - win[0]) * 100;
+  const secAt = x => { const r = bar.getBoundingClientRect();
+    return win[0] + Math.min(1, Math.max(0, (x - r.left) / r.width)) * (win[1] - win[0]); };
+
+  function drawTimeline() {
+    bar.querySelectorAll('.tl-tick').forEach(e => e.remove());
+    tl.querySelectorAll('.tl-hr').forEach(e => e.remove());
+    const frag = document.createDocumentFragment();
+    T.forEach(t => { if (t < win[0] || t > win[1]) return;
+      const d = document.createElement('div'); d.className = 'tl-tick'; d.style.left = pct(t)+'%'; frag.appendChild(d); });
+    bar.appendChild(frag);
+    const span = win[1] - win[0];
+    const step = [300,900,1800,3600,7200,10800].find(s => span / s <= 12) || 21600;
+    for (let s = Math.ceil(win[0]/step)*step; s <= win[1]; s += step) {
+      const h = document.createElement('span'); h.className = 'tl-hr'; h.style.left = pct(s)+'%';
+      h.textContent = fmt(s).slice(0,5); tl.appendChild(h);
+    }
+    show(idx);
+  }
+
+  function show(i) {
+    idx = Math.max(0, Math.min(N - 1, i));
+    const f = FILES[idx], t = T[idx];
+    $('pvTs').textContent = fmt(t);
+    $('pvCtr').textContent = `${idx + 1} / ${N}`;
+    head.style.left = pct(t) + '%';
+    head.style.display = t < win[0] || t > win[1] ? 'none' : '';
+    // instant thumb while scrubbing, then swap to full-res once it loads
+    const tok = ++loadTok;
+    img.src = `/thumb/${DAY}/${f}`;
+    if (!timer) {
+      const full = new Image();
+      full.onload = () => { if (tok === loadTok) img.src = full.src; };
+      full.src = `/media/${DAY}/${f}`;
+    }
+    store.set(DAY, idx);
+  }
+
+  const step = dir => show(idx + dir);
+
+  function play(on) {
+    clearInterval(timer); timer = null;
+    $('bPlay').textContent = on ? '⏸' : '▶';
+    if (!on) return show(idx);   // load full-res of paused frame
+    if (idx >= N - 1 || T[idx] >= win[1]) idx = nearest(win[0]) - 1;
+    timer = setInterval(() => {
+      if (idx >= N - 1 || T[idx + 1] > win[1]) return play(false);
+      show(idx + 1);
+    }, 1000 / +$('sSpeed').value);
+  }
+
+  // timeline: click/drag to scrub
+  let drag = false;
+  tl.addEventListener('pointerdown', e => {
+    tl.setPointerCapture(e.pointerId); drag = true;
+    play(false); show(nearest(secAt(e.clientX)));
+  });
+  tl.addEventListener('pointermove', e => { if (drag) show(nearest(secAt(e.clientX))); });
+  tl.addEventListener('pointerup', () => { drag = false; });
+
+  $('bFirst').onclick = () => show(nearest(win[0]));
+  $('bLast').onclick = () => show(nearest(win[1]));
+  $('bPrev').onclick = () => step(-1);
+  $('bNext').onclick = () => step(1);
+  $('bPlay').onclick = () => play(!timer);
+  $('sSpeed').onchange = () => { store.set('speed', $('sSpeed').value); if (timer) play(true); };
+
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input,select,textarea')) return;
+    const k = { ArrowLeft: () => step(-1), ArrowRight: () => step(1), Home: () => $('bFirst').click(),
+                End: () => $('bLast').click(), ' ': () => play(!timer) }[e.key];
+    if (k) { e.preventDefault(); k(); }
+  });
+
+  function defaultWin() {   // day's frame span, padded to whole hours
+    return [Math.floor(T[0]/3600)*3600, Math.min(86400, Math.ceil((T[N-1]+1)/3600)*3600)];
+  }
+
+  $('sSpeed').value = store.get('speed', '5');
+  const saved = +store.get(DAY, N - 1);
+  idx = saved >= 0 && saved < N ? saved : N - 1;
+  win = defaultWin();
+  drawTimeline();
+})();
+</script>
+{% endif %}
+{% endblock %}

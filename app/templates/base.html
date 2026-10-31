@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CCTV Mini</title>
+<link rel="manifest" href="/static/manifest.webmanifest"><meta name="theme-color" content="#000000">
+<link rel="icon" href="/static/icon-192.png"><link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<style>
+:root{--bg:#111;--fg:#ddd;--mut:#888;--card:#1c1c1c;--acc:#e44;--bd:#333}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif}
+nav{position:sticky;top:0;z-index:50;display:flex;gap:4px;padding:8px 16px;height:48px;background:#000;border-bottom:1px solid var(--bd);align-items:center}
+nav b{margin-right:12px;color:var(--acc);white-space:nowrap}nav .menu{display:flex;gap:4px;margin-left:auto}
+nav .tabs{display:flex;gap:2px;background:#151515;border:1px solid var(--bd);border-radius:7px;padding:2px}
+nav .tabs button{border:0;background:none;padding:4px 10px;white-space:nowrap}nav .tabs button.on{background:#522;color:#fff}
+nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:6px}
+nav a.on,nav a:hover{background:var(--card)}main{padding:16px;max-width:1600px;margin:auto}#burger{display:none;margin-left:auto;font-size:18px;padding:4px 10px}
+@media (max-width:700px){ #burger{display:block}
+ nav .menu{display:none;position:absolute;top:48px;right:8px;flex-direction:column;min-width:180px;background:#000;border:1px solid var(--bd);border-radius:8px;padding:6px;box-shadow:0 8px 24px #000a}
+ nav.open .menu{display:flex}nav b span{display:none}nav a{padding:10px 12px}main{padding:12px}}
+table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--bd);text-align:left}
+button,.btn{background:#333;color:var(--fg);border:1px solid #444;border-radius:6px;padding:6px 12px;cursor:pointer;text-decoration:none;display:inline-block;font:inherit}
+button.danger{background:#511;border-color:#733}input,textarea{background:#000;color:var(--fg);border:1px solid #444;border-radius:4px;padding:6px;font:inherit}
+fieldset{border:1px solid var(--bd);border-radius:8px;margin:0 0 16px;padding:12px}legend{color:var(--acc)}
+label{display:inline-flex;flex-direction:column;gap:4px;margin:0 12px 8px 0;color:var(--mut);font-size:12px}
+.mut{color:var(--mut)}.msg{background:#233;padding:8px;border-radius:6px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}.grid img{width:100%;display:block;border-radius:4px}
+.inl{display:inline}
+.ib{position:relative;width:34px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:15px}
+[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;
+ background:#000;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 8px;font-size:12px;z-index:100;pointer-events:none}
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:10px;padding:16px;max-width:92vw}
+dialog::backdrop{background:#000c}dialog .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+</style></head><body>
+<nav id="nav"><b>●<span> CCTV Mini</span></b>
+{% block navtabs %}{% endblock %}
+<button id="burger" type="button" aria-label="Menu" onclick="nav.classList.toggle('open')">☰</button>
+<div class="menu"><a href="/" class="{{'on' if page=='live'}}">Live</a>
+<a href="/layout" class="{{'on' if page=='lay'}}">Layout</a>
+<a href="/pictures" class="{{'on' if page=='pic'}}">Pictures</a>
+<a href="/timelapse" class="{{'on' if page=='tl'}}">Timelapse</a>
+<a href="/config" class="{{'on' if page=='cfg'}}">Config</a></div></nav>
+<dialog id="cfmDlg"><div id="cfmTxt"></div><div class="acts">
+<button type="button" onclick="cfmDlg.close()">Cancel</button><button type="button" class="danger" id="cfmOk">Delete</button></div></dialog>
+<script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// styled confirm before submitting a destructive form: <form onsubmit="return ask(this,'text')">
+function ask(form, text, ok){ cfmTxt.textContent = text; cfmOk.textContent = ok || 'Delete';
+  cfmOk.onclick = () => { cfmDlg.close(); form.submit() }; cfmDlg.showModal(); return false }
+document.addEventListener('click',e=>{if(!nav.contains(e.target))nav.classList.remove('open')})</script>
+<main>{% block body %}{% endblock %}</main></body></html>

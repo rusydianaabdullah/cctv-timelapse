@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% block body %}
+<style>
+.tlh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tlh h2{margin:0 auto 0 0}
+td.acts{white-space:nowrap;text-align:right}td.acts form{display:inline}
+#vidDlg{width:100vw;height:100dvh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#000}
+#vidDlg video{width:100%;height:100%;object-fit:contain;display:block}
+#vidDlg .x{position:absolute;top:10px;right:10px;z-index:2;background:#000a}
+#vidTitle{position:absolute;top:14px;left:14px;z-index:2;background:#000a;padding:4px 10px;border-radius:4px}
+</style>
+<div class="tlh"><h2>Timelapse</h2>
+<form method="post" action="/cleanup" onsubmit="return ask(this,'Run retention cleanup now? Old pictures and videos past the retention days are deleted.','Run')"><button>Auto-delete</button></form>
+<a href="/timelapse" class="btn">Refresh</a></div>
+{% if jobs %}<p class="mut">Jobs: {% for k,v in jobs.items() %}{{k}} → {{v}}; {% endfor %}</p>{% endif %}
+
+<table><tr><th>Day</th><th>Pictures</th><th>Video</th><th></th></tr>
+{% for r in rows %}<tr><td>{{r.day}}</td><td>{{r.pics or '–'}}</td>
+<td>{% if r.size %}{{ '%.1f'|format(r.size/1048576) }} MB{% else %}<span class="mut">{{r.job or '–'}}</span>{% endif %}</td>
+<td class="acts">
+{% if r.size %}<button class="ib" data-tip="Play" onclick="playVid('{{r.day}}')">▶</button>
+<a class="btn ib" data-tip="Download" href="/timelapse/file/{{r.day}}.mp4" download>⬇</a>{% endif %}
+{% if r.pics %}<a class="btn ib" data-tip="View pictures" href="/pictures?day={{r.day}}">🖼</a>
+<form method="post" action="/timelapse/generate"><input type="hidden" name="day" value="{{r.day}}">
+<button class="ib" data-tip="{{'Regenerate' if r.size else 'Generate'}} video">⟳</button></form>{% endif %}
+{% if r.size %}<form method="post" action="/timelapse/{{r.day}}.mp4/delete" onsubmit="return ask(this,'Delete the timelapse video of {{r.day}}?')">
+<button class="ib danger" data-tip="Delete video">🎞</button></form>{% endif %}
+{% if r.pics %}<form method="post" action="/pictures/{{r.day}}/delete" onsubmit="return ask(this,'Delete all {{r.pics}} pictures of {{r.day}}?')">
+<button class="ib danger" data-tip="Delete pictures">🗑</button></form>{% endif %}
+</td></tr>
+{% else %}<tr><td colspan="4" class="mut">No timelapse or pictures yet.</td></tr>{% endfor %}</table>
+
+
+<dialog id="vidDlg" onclose="player.pause();player.removeAttribute('src');player.load()">
+<span id="vidTitle"></span><button type="button" class="ib x" data-tip="Close (Esc)" onclick="vidDlg.close()">✕</button>
+<video id="player" controls playsinline></video></dialog>
+<script>
+function playVid(day){ vidTitle.textContent = day; player.src = '/timelapse/file/' + day + '.mp4'; vidDlg.showModal(); player.play() }
+</script>
+{% endblock %}

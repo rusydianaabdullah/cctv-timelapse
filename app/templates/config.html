@@ -1,0 +1,83 @@
+{% extends "base.html" %}{% block body %}
+<h2>Config <span class="mut" style="font-size:12px">(stored in config.json)</span></h2>
+{% if msg %}<div class="msg">{{msg}}</div>{% endif %}
+<form method="post" action="/config">
+<fieldset><legend>Cameras (RTSP — use sub-stream if available)</legend>
+<style>
+.cams{display:grid;gap:8px}.cam-row{display:grid;grid-template-columns:auto 200px 1fr;gap:8px;align-items:center}
+.cam-row .act{display:flex;gap:6px;align-items:center}.cam-row input[type=text]{width:100%}.cam-head{color:var(--mut);font-size:12px}
+@media (max-width:700px){.cam-row{grid-template-columns:auto 1fr;padding:8px;border:1px solid var(--bd);border-radius:6px}
+ .cam-row .url{grid-column:1/-1}.cam-head{display:none}}
+</style>
+<div class="cams" id="cams"><div class="cam-row cam-head"><span>On / Delete</span><span>Name</span><span class="url">RTSP URL</span></div>
+{% for c in cfg.cameras %}<div class="cam-row">
+<div class="act"><input type="checkbox" name="cam_enabled" value="{{loop.index0}}" {{'checked' if c.enabled}} title="Enabled">
+<button type="button" class="danger" title="Delete" onclick="delCam(this)">✕</button></div>
+<input type="hidden" name="cam_id" value="{{c.id}}"><input type="text" name="cam_name" value="{{c.name}}" placeholder="Name">
+<input type="text" class="url" name="cam_url" value="{{c.url}}" placeholder="rtsp://user:pass@ip:554/..."></div>{% endfor %}</div>
+<p><button type="button" onclick="addCam()">+ Add camera</button>
+<button type="button" onclick="disc.style.display=disc.style.display?'':'none'">🔍 Find RTSP on network</button></p>
+<div id="disc" style="display:none;border:1px dashed #444;border-radius:6px;padding:10px">
+<label>Subnet<input id="d_net" value="{{subnet}}"></label>
+<label>Camera user (optional)<input id="d_user" autocomplete="off"></label>
+<label>Camera password<input id="d_pass" type="password" autocomplete="new-password"></label>
+<button type="button" id="d_btn" onclick="discoverRtsp()">Scan</button>
+<div id="d_out" class="mut" style="margin-top:8px">Scans ports 554/8554/10554 and tries common Hikvision, Dahua, Tapo, Reolink and generic paths.</div></div></fieldset>
+<p class="mut">Collage size and arrangement are set on the <a href="/layout" style="color:#e44">Layout</a> page.</p>
+<fieldset><legend>Scheduler / capture</legend>
+<label>Capture every (s)<input type="number" step="0.5" name="interval_seconds" value="{{cfg.capture.interval_seconds}}"></label>
+<label>Save cooldown (s)<input type="number" step="0.5" name="cooldown_seconds" value="{{cfg.capture.cooldown_seconds}}"></label>
+<label>RTSP timeout (s)<input type="number" name="timeout_seconds" value="{{cfg.capture.timeout_seconds}}"></label>
+<label>Heartbeat active<input type="checkbox" name="heartbeat_enabled" {{'checked' if cfg.capture.heartbeat_enabled}}></label>
+<label>Heartbeat every (min)<input type="number" step="1" min="1" name="heartbeat_minutes" value="{{cfg.capture.heartbeat_minutes}}"></label>
+<div class="mut" style="font-size:12px">Heartbeat saves a collage every N minutes even with no motion, so the day's timelapse has no gaps.</div></fieldset>
+<fieldset><legend>Motion detection</legend>
+<label>Sensitivity<select id="sens" onchange="setSens()" style="background:#000;color:var(--fg);border:1px solid #444;border-radius:4px;padding:6px">
+<option value="10,0.5">Very high — leaves, small movement</option><option value="18,1.5">High — people far away</option>
+<option value="25,3">Medium — people walking</option><option value="35,6">Low — large objects only</option>
+<option value="45,10">Very low — vehicles / big changes</option><option value="">Custom</option></select></label>
+<label>Compare width<input type="number" name="compare_width" value="{{cfg.motion.compare_width}}"></label>
+<label>Compare height<input type="number" name="compare_height" value="{{cfg.motion.compare_height}}"></label>
+<label>Pixel noise threshold (0-255)<input type="number" id="m_px" oninput="syncSens()" name="pixel_threshold" value="{{cfg.motion.pixel_threshold}}"></label>
+<label>Changed pixels to trigger (%)<input type="number" step="0.1" id="m_pc" oninput="syncSens()" name="change_percent" value="{{cfg.motion.change_percent}}"></label>
+<div class="mut" style="font-size:12px">Higher sensitivity = lower noise threshold and fewer changed pixels needed → more saves (and more false alarms at night or in rain).</div></fieldset>
+<fieldset><legend>Realtime (Live page)</legend>
+<label>Frames per second<input type="number" step="1" min="1" max="25" name="live_fps" value="{{cfg.live.fps}}"></label>
+<label>Max width (px)<input type="number" step="2" min="160" max="1920" name="live_width" value="{{cfg.live.width}}"></label>
+<div class="mut" style="font-size:12px">Opens an extra RTSP session per camera only while someone is watching; closed 20 s after the last viewer leaves.</div></fieldset>
+<fieldset><legend>Timelapse</legend>
+<label>Render FPS<input type="number" step="0.5" name="fps" value="{{cfg.timelapse.fps}}"></label>
+<label>Auto-generate daily<input type="checkbox" name="auto_generate" {{'checked' if cfg.timelapse.auto_generate}}></label>
+<label>Generate at (for yesterday)<input type="time" name="generate_time" value="{{cfg.timelapse.generate_time}}"></label></fieldset>
+<fieldset><legend>Auto deletion (0 = keep forever)</legend>
+<label>Delete images older than (days)<input type="number" name="images_days" value="{{cfg.retention.images_days}}"></label>
+<label>Delete timelapse older than (days)<input type="number" name="timelapse_days" value="{{cfg.retention.timelapse_days}}"></label></fieldset>
+<button>Save config</button></form>
+<details style="margin-top:24px"><summary>Raw JSON</summary>
+<form method="post" action="/config/raw"><textarea name="raw" rows="24" style="width:100%;font-family:monospace">{{raw}}</textarea><button>Save raw JSON</button></form></details>
+<script>
+function setSens(){ if (!sens.value) return; [m_px.value, m_pc.value] = sens.value.split(',') }
+function syncSens(){ const v = (+m_px.value) + ',' + (+m_pc.value); sens.value = [...sens.options].some(o => o.value == v) ? v : '' }
+syncSens();
+function reindex(){document.querySelectorAll('#cams input[name=cam_enabled]').forEach((c,i)=>c.value=i)}
+function delCam(b){b.closest('.cam-row').remove();reindex()}
+async function discoverRtsp(){
+ d_btn.disabled=true;d_out.textContent='Scanning… (may take ~30 s)';
+ const fd=new FormData();fd.append('subnet',d_net.value);fd.append('user',d_user.value);fd.append('password',d_pass.value);
+ try{const r=await fetch('/api/discover',{method:'POST',body:fd});const j=await r.json();
+  if(!r.ok) throw new Error(j.detail);
+  if(!j.results.length){d_out.textContent='No RTSP devices found.';return}
+  d_out.innerHTML='';
+  for(const h of j.results){const div=document.createElement('div');div.style.margin='6px 0';
+   div.innerHTML=`<b style="color:#ddd">${h.host}:${h.port}</b> `+(h.streams.length?'':(h.auth_needed?'— needs login (enter user/password and rescan)':'— RTSP port open, no known path matched'));
+   for(const st of h.streams){const b=document.createElement('button');b.type='button';b.style.margin='2px';
+    b.textContent='+ '+st.label+': '+st.url.replace(/\/\/[^@]*@/,'//***@');b.onclick=()=>addCam(st.url);div.appendChild(b)}
+   d_out.appendChild(div)}
+ }catch(e){d_out.textContent='Error: '+e.message}finally{d_btn.disabled=false}}
+function addCam(url){const n=document.querySelectorAll('#cams .cam-row:not(.cam-head)').length+1;const row=document.createElement('div');row.className='cam-row';
+row.innerHTML=`<div class="act"><input type="checkbox" name="cam_enabled" checked title="Enabled"><button type="button" class="danger" title="Delete" onclick="delCam(this)">✕</button></div>
+<input type="hidden" name="cam_id" value=""><input type="text" name="cam_name" value="CAM ${String(n).padStart(2,'0')}" placeholder="Name">
+<input type="text" class="url" name="cam_url" placeholder="rtsp://user:pass@ip:554/..." value="${url||''}">`;
+cams.appendChild(row);reindex()}
+</script>
+{% endblock %}
